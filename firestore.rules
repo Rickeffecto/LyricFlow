@@ -1,0 +1,122 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: structures
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required, 1-100 chars)
+//   - materials: list (required, max 50 items)
+//     - name: string (required, 1-100 chars)
+//     - unit: string (required, 1-20 chars)
+//     - quantity: number (required, positive)
+//     - cost: number (optional, positive)
+//   - createdAt: number (required, timestamp)
+//   - updatedAt: number (required, timestamp)
+//   - ownerUid: string (required, matches auth.uid)
+//
+// Collection: projects
+// Document ID: auto-generated
+// Fields:
+//   - name: string (required, 1-100 chars)
+//   - client: string (required, 1-100 chars)
+//   - type: string (required, enum: ['proyecto', 'cotización'])
+//   - structures: list (required, max 50 items)
+//     - structureId: string (required)
+//     - quantity: number (required, positive)
+//   - status: string (required, enum: ['active', 'completed', 'archived'])
+//   - completionDate: number (optional, timestamp)
+//   - createdAt: number (required, timestamp)
+//   - updatedAt: number (required, timestamp)
+//   - ownerUid: string (required, matches auth.uid)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(ownerUid) {
+      return isAuthenticated() && request.auth.uid == ownerUid;
+    }
+
+    function isValidString(val, min, max) {
+      return val is string && val.size() >= min && val.size() <= max;
+    }
+
+    function isPositive(val) {
+      return val is number && val >= 0;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidMaterial(m) {
+      return isValidString(m.name, 1, 100) &&
+             isValidString(m.unit, 1, 20) &&
+             isPositive(m.quantity) &&
+             (!('cost' in m) || isPositive(m.cost));
+    }
+
+    function isValidStructure(data) {
+      return isValidString(data.name, 1, 100) &&
+             data.materials is list &&
+             data.materials.size() <= 50 &&
+             data.materials.all(m, isValidMaterial(m)) &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerUid == request.auth.uid;
+    }
+
+    function isValidProjectStructure(ps) {
+      return ps.structureId is string && isPositive(ps.quantity);
+    }
+
+    function isValidProject(data) {
+      return isValidString(data.name, 1, 100) &&
+             isValidString(data.client, 1, 100) &&
+             data.type in ['proyecto', 'cotización'] &&
+             data.structures is list &&
+             data.structures.size() <= 50 &&
+             data.structures.all(ps, isValidProjectStructure(ps)) &&
+             data.status in ['active', 'completed', 'archived'] &&
+             (!('completionDate' in data) || data.completionDate is number) &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerUid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /structures/{structureId} {
+      allow read: if isOwner(resource.data.ownerUid);
+      allow create: if isAuthenticated() && isValidStructure(request.resource.data);
+      allow update: if isOwner(resource.data.ownerUid) && 
+                      isValidStructure(request.resource.data) &&
+                      request.resource.data.ownerUid == resource.data.ownerUid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(resource.data.ownerUid);
+    }
+
+    match /projects/{projectId} {
+      allow read: if isOwner(resource.data.ownerUid);
+      allow create: if isAuthenticated() && isValidProject(request.resource.data);
+      allow update: if isOwner(resource.data.ownerUid) && 
+                      isValidProject(request.resource.data) &&
+                      request.resource.data.ownerUid == resource.data.ownerUid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isOwner(resource.data.ownerUid);
+    }
+  }
+}
